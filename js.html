@@ -1,0 +1,563 @@
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // === State ===
+  const state = {
+    room: (typeof ROOM_CONFIGS_JSON !== 'undefined' && ROOM_CONFIGS_JSON.length > 0) ? ROOM_CONFIGS_JSON[0].name : '',
+    date: new Date(),
+    calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+    events: [],
+    loading: false
+  };
+
+  // === Elements ===
+  const els = {
+    body: document.body,
+    tabs: document.querySelectorAll('.tab'),
+    btnViewMonthly: document.getElementById('btn-view-monthly'),
+    btnViewDaily: document.getElementById('btn-view-daily'),
+    viewMonthly: document.getElementById('view-monthly'),
+    viewDaily: document.getElementById('view-daily'),
+    dateScroll: document.getElementById('date-scroll'),
+    calMonthTitle: document.getElementById('calendar-month-title'),
+    calGrid: document.getElementById('calendar-grid'),
+    btnPrevMonth: document.getElementById('btn-prev-month'),
+    btnNextMonth: document.getElementById('btn-next-month'),
+    dateTitle: document.getElementById('selected-date-title'),
+    scheduleList: document.getElementById('schedule-list'),
+    
+    // Modals
+    modalReserve: document.getElementById('modal-reserve'),
+    modalAdmin: document.getElementById('modal-admin'),
+    formRoomLabel: document.getElementById('form-room-label'),
+    
+    // Forms
+    formReserve: document.getElementById('form-reserve'),
+    formAdmin: document.getElementById('form-admin'),
+    reserveMsg: document.getElementById('reserve-msg'),
+    adminMsg: document.getElementById('admin-msg'),
+    
+    // Inputs (Reserve)
+    inputDate: document.getElementById('input-date'),
+    inputStart: document.getElementById('input-start'),
+    inputEnd: document.getElementById('input-end'),
+    inputTitle: document.getElementById('input-title'),
+    inputName: document.getElementById('input-name'),
+    inputEmail: document.getElementById('input-email'),
+    btnSubmitReserve: document.getElementById('btn-submit-reserve'),
+    
+    // Edit View
+    editView: document.getElementById('edit-view'),
+    mainView: document.getElementById('main-view'),
+    editLoading: document.getElementById('edit-loading'),
+    editContent: document.getElementById('edit-content'),
+    resDetailsBox: document.getElementById('res-details-box'),
+    btnCancelRes: document.getElementById('btn-cancel-reservation'),
+    btnBackHome: document.getElementById('btn-back-home'),
+    
+    // Notices
+    noticeMonthly: document.getElementById('room-notice-monthly'),
+    noticeDaily: document.getElementById('room-notice-daily'),
+  };
+
+  // === Initialization ===
+  function init() {
+    // 編集モーダルモードの場合は専用画面を表示
+    if (SERVER_EDIT_TOKEN !== "") {
+      showEditView();
+      return;
+    }
+    
+    // URLパラメータで部屋が指定されている場合
+    if (typeof DEFAULT_ROOM !== 'undefined' && DEFAULT_ROOM !== '') {
+      els.tabs.forEach(t => {
+        if (t.dataset.room === DEFAULT_ROOM) {
+           els.tabs.forEach(tab => tab.classList.remove('active'));
+           t.classList.add('active');
+           state.room = DEFAULT_ROOM;
+           els.body.setAttribute('data-theme', state.room);
+        }
+      });
+    }
+
+    startNormalMode();
+  }
+
+  let isUiSetup = false;
+  function startNormalMode() {
+    els.editView.classList.add('hidden');
+    document.querySelector('.room-tabs').parentElement.style.justifyContent = 'space-between';
+    document.querySelector('.room-tabs').classList.remove('hidden');
+    els.mainView.classList.remove('hidden');
+    
+    // Setup event listeners exactly once
+    if (!isUiSetup) {
+       setupTabs();
+       setupCalendar();
+       setupViewToggles();
+       setupModals();
+       isUiSetup = true;
+    }
+    syncStateToViews();
+    fetchEvents();
+  }
+
+  function setupViewToggles() {
+    if (!els.btnViewMonthly) return;
+    els.btnViewMonthly.onclick = () => {
+      els.btnViewMonthly.classList.add('active');
+      els.btnViewDaily.classList.remove('active');
+      els.viewMonthly.classList.remove('hidden');
+      els.viewDaily.classList.add('hidden');
+    };
+    els.btnViewDaily.onclick = () => {
+      els.btnViewDaily.classList.add('active');
+      els.btnViewMonthly.classList.remove('active');
+      els.viewDaily.classList.remove('hidden');
+      els.viewMonthly.classList.add('hidden');
+    };
+  }
+
+  function syncStateToViews() {
+    renderCalendar();
+    renderDateSelector(); 
+
+    // Toggle notice based on room
+    let noticeHtml = '';
+    if (typeof ROOM_CONFIGS_JSON !== 'undefined') {
+      const config = ROOM_CONFIGS_JSON.find(c => c.name === state.room);
+      if (config) noticeHtml = config.notice;
+    }
+
+    if (noticeHtml) {
+      if (els.noticeMonthly) { els.noticeMonthly.innerHTML = noticeHtml; els.noticeMonthly.classList.remove('hidden'); }
+      if (els.noticeDaily) { els.noticeDaily.innerHTML = noticeHtml; els.noticeDaily.classList.remove('hidden'); }
+    } else {
+      if (els.noticeMonthly) els.noticeMonthly.classList.add('hidden');
+      if (els.noticeDaily) els.noticeDaily.classList.add('hidden');
+    }
+  }
+
+  // === Edit View Logic ===
+  function showEditView() {
+    els.mainView.classList.add('hidden');
+    document.querySelector('.room-tabs').parentElement.style.justifyContent = 'center';
+    document.querySelector('.room-tabs').classList.add('hidden');
+    els.editView.classList.remove('hidden');
+    
+    // Fetch reservation details
+    google.script.run.withSuccessHandler(res => {
+      els.editLoading.classList.add('hidden');
+      els.editContent.classList.remove('hidden');
+      
+      els.body.setAttribute('data-theme', res.room);
+      
+      const s = new Date(res.start);
+      const e = new Date(res.end);
+      const dateStr = `${s.getFullYear()}/${String(s.getMonth()+1).padStart(2,'0')}/${String(s.getDate()).padStart(2,'0')}`;
+      const timeStr = `${String(s.getHours()).padStart(2,'0')}:${String(s.getMinutes()).padStart(2,'0')} - ${String(e.getHours()).padStart(2,'0')}:${String(e.getMinutes()).padStart(2,'0')}`;
+      
+      els.resDetailsBox.innerHTML = `
+        <p><strong>場所:</strong> ${res.room}</p>
+        <p><strong>日付:</strong> ${dateStr}</p>
+        <p><strong>時間:</strong> ${timeStr}</p>
+        <p><strong>目的:</strong> ${res.title}</p>
+        <p><strong>氏名:</strong> ${res.name}</p>
+        <p><strong>メール:</strong> ${res.email}</p>
+      `;
+      
+      els.btnBackHome.href = `${APP_URL}?room=${res.room}`;
+      
+      // Setup cancel button
+      els.btnCancelRes.onclick = () => {
+        if (!confirm('本当にこの予約を取り消しますか？ この操作は元に戻せません。')) return;
+        els.btnCancelRes.disabled = true;
+        els.btnCancelRes.innerText = '取消中...';
+        
+        google.script.run.withSuccessHandler(() => {
+          els.editContent.innerHTML = `
+            <div class="empty-state">
+              <i class="fa-regular fa-circle-check fa-4x" style="color:var(--primary); margin-bottom:1rem;"></i>
+              <h2>キャンセル完了</h2>
+              <p>予約は正常に取り消されました。</p>
+              <a href="${APP_URL}?room=${res.room}" target="_top" class="btn btn-primary mt-4" style="display:inline-block; text-decoration:none;">ホームに戻る</a>
+            </div>
+          `;
+        }).withFailureHandler(err => {
+          alert('エラー: ' + err.message);
+          els.btnCancelRes.disabled = false;
+          els.btnCancelRes.innerText = 'この予約を取り消す';
+        }).cancelReservation(SERVER_EDIT_TOKEN);
+      };
+      
+    }).withFailureHandler(err => {
+      // エラー時（URL無効など）はアラートを出して自動で通常モードへ遷移
+      alert('無効な予約リンクです（すでにキャンセルされたか、URLが正しくありません）。カレンダー画面へ移動します。');
+      startNormalMode();
+    }).getReservationByToken(SERVER_EDIT_TOKEN);
+    
+    // 正常に読み込めた場合の戻るボタン
+    els.btnBackHome.href = APP_URL;
+  }
+
+  // === Normal View Logic ===
+  function setupTabs() {
+    els.tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        els.tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        state.room = tab.dataset.room;
+        els.body.setAttribute('data-theme', state.room);
+        els.formRoomLabel.innerText = state.room;
+        syncStateToViews(); // Re-render for new room
+        renderEvents(); 
+      });
+    });
+  }
+
+  function setupCalendar() {
+    els.btnPrevMonth.onclick = () => {
+      state.calendarMonth.setMonth(state.calendarMonth.getMonth() - 1);
+      renderCalendar();
+    };
+    els.btnNextMonth.onclick = () => {
+      state.calendarMonth.setMonth(state.calendarMonth.getMonth() + 1);
+      renderCalendar();
+    };
+  }
+
+  function renderDateSelector() {
+    els.dateScroll.innerHTML = '';
+    const today = new Date();
+    const days = ['日', '月', '火', '水', '木', '金', '土'];
+    for (let i = 0; i < 90; i++) {
+      const d = new Date(today);
+      d.setDate(today.getDate() + i);
+      const card = document.createElement('div');
+      card.className = 'date-card';
+      if (d.getDate() === state.date.getDate() && d.getMonth() === state.date.getMonth() && d.getFullYear() === state.date.getFullYear()) {
+         card.classList.add('active');
+      }
+      let numClass = "day-num";
+      if (d.getDay() === 0) numClass += " color-sun";
+      if (d.getDay() === 6) numClass += " color-sat";
+      card.innerHTML = `<div class="day-name">${d.getMonth()+1}月 (${days[d.getDay()]})</div><div class="${numClass}">${d.getDate()}</div>`;
+
+      const dayEvents = state.events.filter(e => {
+        if (e.room !== state.room || !e.start) return false;
+        const es = new Date(e.start);
+        return es.getDate() === d.getDate() && es.getMonth() === d.getMonth() && es.getFullYear() === d.getFullYear();
+      });
+      if (dayEvents.length > 0) {
+        const labels = document.createElement('div');
+        labels.className = 'date-card-labels';
+        const sortedEvents = dayEvents.slice().sort((a,b) => new Date(a.start) - new Date(b.start));
+        for (let j = 0; j < Math.min(sortedEvents.length, 3); j++) {
+           const e = sortedEvents[j];
+           const es = new Date(e.start);
+           const hour = String(es.getHours()).padStart(2, '0');
+           const label = document.createElement('div');
+           label.className = 'date-card-label';
+           label.title = `${hour}:00 ${e.title}`;
+           const shortTitle = e.title.length > 4 ? e.title.substring(0, 4) + '…' : e.title;
+           label.innerText = `${hour} ${shortTitle}`;
+           labels.appendChild(label);
+        }
+        if (sortedEvents.length > 3) {
+           const more = document.createElement('div');
+           more.className = 'date-card-more';
+           more.innerText = `+${sortedEvents.length - 3}`;
+           labels.appendChild(more);
+        }
+        card.appendChild(labels);
+      }
+
+      card.addEventListener('click', () => {
+        state.date = d;
+        state.calendarMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+        syncStateToViews();
+        renderEvents();
+        // scroll to element smoothly
+        card.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      });
+      els.dateScroll.appendChild(card);
+    }
+  }
+
+  function renderCalendar() {
+    const year = state.calendarMonth.getFullYear();
+    const month = state.calendarMonth.getMonth();
+    els.calMonthTitle.innerText = `${year}年 ${month + 1}月`;
+    
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    els.calGrid.innerHTML = '';
+    const today = new Date();
+    
+    // 空セル
+    for(let i=0; i<firstDay; i++) {
+       const cell = document.createElement('div');
+       cell.className = 'cal-cell empty';
+       els.calGrid.appendChild(cell);
+    }
+    
+    for(let d=1; d<=daysInMonth; d++) {
+       const cellDate = new Date(year, month, d);
+       const cell = document.createElement('div');
+       cell.className = 'cal-cell';
+       
+       if (cellDate.getDate() === state.date.getDate() && cellDate.getMonth() === state.date.getMonth() && cellDate.getFullYear() === state.date.getFullYear()) {
+         cell.classList.add('active');
+       }
+       if (cellDate.getDate() === today.getDate() && cellDate.getMonth() === today.getMonth() && cellDate.getFullYear() === today.getFullYear()) {
+         cell.classList.add('today');
+       }
+       
+       const num = document.createElement('span');
+       num.innerText = d;
+       if (cellDate.getDay() === 0) num.classList.add('color-sun');
+       if (cellDate.getDay() === 6) num.classList.add('color-sat');
+       cell.appendChild(num);
+       
+       const dayEvents = state.events.filter(e => {
+         if (e.room !== state.room || !e.start) return false;
+         const es = new Date(e.start);
+         return es.getDate() === d && es.getMonth() === month && es.getFullYear() === year;
+       });
+       
+       if (dayEvents.length > 0) {
+         const labels = document.createElement('div');
+         labels.className = 'cal-labels';
+         // Sort technically already done when fetching, but we can display the first 3
+         const sortedEvents = dayEvents.slice().sort((a,b) => new Date(a.start) - new Date(b.start));
+         for(let i=0; i<Math.min(sortedEvents.length, 3); i++) {
+            const e = sortedEvents[i];
+            const es = new Date(e.start);
+            const hour = String(es.getHours()).padStart(2, '0');
+            const label = document.createElement('div');
+            label.className = 'cal-event-label';
+            label.title = `${hour}:00 ${e.title}`; // hover tooltip
+            const shortTitle = e.title.length > 4 ? e.title.substring(0, 4) + '…' : e.title;
+            label.innerText = `${hour} ${shortTitle}`;
+            labels.appendChild(label);
+         }
+         if (sortedEvents.length > 3) {
+            const more = document.createElement('div');
+            more.className = 'cal-more';
+            more.innerText = `+${sortedEvents.length - 3}`;
+            labels.appendChild(more);
+         }
+         cell.appendChild(labels);
+       }
+       
+       cell.onclick = () => {
+         state.date = cellDate;
+         syncStateToViews(); 
+         renderEvents();
+       };
+       els.calGrid.appendChild(cell);
+    }
+    
+    const days = ['日', '月', '火', '水', '木', '金', '土'];
+    els.dateTitle.innerText = `${state.date.getMonth()+1}月${state.date.getDate()}日 (${days[state.date.getDay()]}) の予約`;
+  }
+
+  function fetchEvents() {
+    state.loading = true;
+    els.scheduleList.innerHTML = '<div class="loading-spinner"><i class="fa-solid fa-spinner fa-spin fa-2x"></i></div>';
+    
+    google.script.run.withSuccessHandler(res => {
+      state.events = res;
+      state.loading = false;
+      syncStateToViews();
+      renderEvents();
+    }).withFailureHandler(err => {
+      els.scheduleList.innerHTML = `<p class="text-danger">エラー: ${err.message}</p>`;
+      state.loading = false;
+    }).getReservations();
+  }
+
+  function renderEvents() {
+    if (state.loading) return;
+    
+    // 対象日の開始と終了
+    const targetStart = new Date(state.date);
+    targetStart.setHours(0,0,0,0);
+    const targetEnd = new Date(state.date);
+    targetEnd.setHours(23,59,59,999);
+    
+    const dayEvents = state.events.filter(e => {
+      if (e.room !== state.room) return false;
+      const es = new Date(e.start);
+      // その日に被っているか (同日判定としてシンプルに開始日が一致するかチェック)
+      return es >= targetStart && es <= targetEnd;
+    });
+    
+    // 時間順にソート
+    dayEvents.sort((a,b) => new Date(a.start) - new Date(b.start));
+    
+    els.scheduleList.innerHTML = '';
+    
+    if (dayEvents.length === 0) {
+      els.scheduleList.innerHTML = `
+        <div class="empty-state">
+          <i class="fa-regular fa-calendar-xmark fa-3x" style="margin-bottom:1rem; opacity:0.5;"></i>
+          <p>この日の予約はありません</p>
+        </div>
+      `;
+      return;
+    }
+    
+    dayEvents.forEach(e => {
+      const s = new Date(e.start);
+      const en = new Date(e.end);
+      const timeStr = `${String(s.getHours()).padStart(2,'0')}:${String(s.getMinutes()).padStart(2,'0')} - ${String(en.getHours()).padStart(2,'0')}:${String(en.getMinutes()).padStart(2,'0')}`;
+      
+      const card = document.createElement('div');
+      card.className = 'event-card';
+      card.innerHTML = `
+        <div class="event-time">${timeStr}</div>
+        <div class="event-title">${e.title}</div>
+        <div class="event-meta">
+          <span><i class="fa-solid fa-user"></i> ${e.name}</span>
+        </div>
+      `;
+      els.scheduleList.appendChild(card);
+    });
+  }
+
+  // === Modals & Forms ===
+  function setupModals() {
+    // Open Reserve
+    document.getElementById('fab-add').addEventListener('click', () => {
+      // Set default date input to selected date
+      const d = state.date;
+      els.inputDate.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      
+      const today = new Date();
+      const maxDate = new Date();
+      maxDate.setMonth(maxDate.getMonth() + 3);
+      els.inputDate.min = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+      els.inputDate.max = `${maxDate.getFullYear()}-${String(maxDate.getMonth()+1).padStart(2,'0')}-${String(maxDate.getDate()).padStart(2,'0')}`;
+      
+      showMessage(els.reserveMsg, '', '');
+      els.modalReserve.classList.remove('hidden');
+      els.formRoomLabel.innerText = state.room;
+    });
+    
+    // Open Admin
+    document.getElementById('btn-open-admin').addEventListener('click', () => {
+      showMessage(els.adminMsg, '', '');
+      els.modalAdmin.classList.remove('hidden');
+    });
+    
+    const hintEl = document.getElementById('email-domain-hint');
+    if (hintEl && typeof ALLOWED_DOMAINS !== 'undefined') {
+       hintEl.innerText = `※ ${ALLOWED_DOMAINS.join(' または ')} ドメイン（サブドメイン含む）のみ使用可能です`;
+    }
+
+    // Close buttons
+    document.querySelectorAll('.modal-close, .modal-backdrop').forEach(btn => {
+      btn.addEventListener('click', () => {
+        els.modalReserve.classList.add('hidden');
+        els.modalAdmin.classList.add('hidden');
+      });
+    });
+
+    // Submit Reservation
+    els.formReserve.addEventListener('submit', (e) => {
+      e.preventDefault();
+      
+      els.btnSubmitReserve.disabled = true;
+      els.btnSubmitReserve.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 処理中...';
+      
+      const formData = {
+        room: state.room,
+        date: els.inputDate.value,
+        startTime: els.inputStart.value,
+        endTime: els.inputEnd.value,
+        title: els.inputTitle.value,
+        name: els.inputName.value,
+        email: els.inputEmail.value
+      };
+
+      // クライアント側チェック
+      const email = formData.email;
+      const isAllowed = ALLOWED_DOMAINS.some(domain => email.endsWith(domain));
+      if (!isAllowed) {
+         showMessage(els.reserveMsg, '許可されていないドメインのメールアドレスです。', 'error');
+         els.btnSubmitReserve.disabled = false;
+         els.btnSubmitReserve.innerText = '仮予約する';
+         return;
+      }
+      
+      google.script.run.withSuccessHandler(res => {
+        els.btnSubmitReserve.disabled = false;
+        els.btnSubmitReserve.innerText = '仮予約する';
+        els.formReserve.reset();
+        els.modalReserve.classList.add('hidden');
+        alert('仮予約を受け付けました。入力されたメールアドレスに確定用URLが送信されましたので、15分以内にクリックして予約を確定してください。');
+        fetchEvents(); // reload list
+      }).withFailureHandler(err => {
+        els.btnSubmitReserve.disabled = false;
+        els.btnSubmitReserve.innerText = '仮予約する';
+        showMessage(els.reserveMsg, err.message, 'error');
+      }).createReservation(formData);
+    });
+
+    // Submit Admin CSV
+    els.formAdmin.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const fileInput = document.getElementById('input-csv');
+      const pwInput = document.getElementById('input-admin-pw').value;
+      const btn = document.getElementById('btn-submit-admin');
+      
+      if (!fileInput.files.length) return alert('ファイルを選択してください');
+      
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> アップロード中...';
+      
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = function(evt) {
+        const csvContent = evt.target.result;
+        
+        google.script.run.withSuccessHandler(res => {
+          btn.disabled = false;
+          btn.innerText = 'アップロード';
+          els.formAdmin.reset();
+          els.modalAdmin.classList.add('hidden');
+          alert(`${res.count}件の予約を一括登録しました。`);
+          fetchEvents();
+        }).withFailureHandler(err => {
+          btn.disabled = false;
+          btn.innerText = 'アップロード';
+          showMessage(els.adminMsg, err.message, 'error');
+        }).uploadCsv(csvContent, pwInput);
+      };
+      
+      reader.onerror = function() {
+        btn.disabled = false;
+        btn.innerText = 'アップロード';
+        showMessage(els.adminMsg, 'ファイルの読み込みに失敗しました。', 'error');
+      };
+      
+      reader.readAsText(file, 'UTF-8');
+    });
+  }
+  
+  function showMessage(el, text, type) {
+    if (!text) {
+      el.className = 'form-message';
+      el.innerText = '';
+      return;
+    }
+    el.className = `form-message ${type}`;
+    el.innerText = text;
+  }
+
+  // Start!
+  init();
+});
+</script>

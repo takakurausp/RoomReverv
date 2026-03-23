@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title><?= appTitle ?></title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <?!= include('css'); ?>
+  <style>
+    <? roomConfigs.forEach(function(config) { ?>
+    [data-theme="<?= config.name ?>"] {
+      --primary: <?= config.primary ?>;
+      --primary-hover: <?= config.primary ?>;
+      --primary-light: <?= config.primaryLight ?>;
+      --bg-gradient: <?= config.bgGradient ?>;
+      --tab-active-bg: <?= config.primary ?>;
+      --tab-active-text: #ffffff;
+    }
+    <? }); ?>
+  </style>
+</head>
+<body data-theme="<?= roomConfigs[0].name ?>">
+  
+  <div id="app" class="app-container">
+    <header class="app-header glass">
+      <div class="header-inner">
+        <h1 class="logo"><i class="fa-solid fa-calendar-check"></i> RoomReserv</h1>
+        <div class="room-tabs">
+          <? roomConfigs.forEach(function(config, i) { ?>
+            <button class="tab <?= i === 0 ? 'active' : '' ?>" data-room="<?= config.name ?>"><?= config.name ?></button>
+          <? }); ?>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <section id="edit-view" class="view hidden glass-panel">
+        <div class="loading-spinner" id="edit-loading">
+           <i class="fa-solid fa-spinner fa-spin fa-2x"></i>
+           <p>読み込み中...</p>
+        </div>
+        <div id="edit-content" class="hidden">
+           <h2>予約の取り消し</h2>
+           <p class="text-muted" style="font-size:0.85rem; margin-bottom:1rem;">内容を確認し、よろしければ処理を行ってください。</p>
+           <div class="reservation-details" id="res-details-box"></div>
+           <div class="action-buttons mt-4">
+             <button id="btn-cancel-reservation" class="btn btn-danger">この予約を取り消す</button>
+             <a id="btn-back-home" class="btn btn-secondary mt-2" style="display:inline-block; text-decoration:none; text-align:center;">ホームに戻る</a>
+           </div>
+        </div>
+      </section>
+
+      <section id="main-view" class="view">
+        <div class="view-controls">
+          <div class="view-toggle">
+            <button id="btn-view-monthly" class="toggle-btn active">月間表示</button>
+            <button id="btn-view-daily" class="toggle-btn">日ごと表示</button>
+          </div>
+        </div>
+
+        <div id="view-monthly" class="calendar-wrapper glass-panel">
+          <div class="calendar-header">
+            <button id="btn-prev-month" class="btn-icon"><i class="fa-solid fa-chevron-left"></i></button>
+            <h3 id="calendar-month-title"></h3>
+            <button id="btn-next-month" class="btn-icon"><i class="fa-solid fa-chevron-right"></i></button>
+          </div>
+          <div class="calendar-grid-header">
+            <div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div>
+          </div>
+          <div class="calendar-grid" id="calendar-grid">
+            <!-- dates injected by JS -->
+          </div>
+          <div class="room-notice hidden" id="room-notice-monthly">９月と２月の大学院入試では優先使用の予定<br>18時以降は原則として学生の自主勉強会のため開放</div>
+        </div>
+
+        <div id="view-daily" class="date-selector-wrapper glass-panel hidden">
+          <div class="date-selector" id="date-scroll"></div>
+          <div class="room-notice hidden" id="room-notice-daily">９月と２月の大学院入試では優先使用の予定<br>18時以降は原則として学生の自主勉強会のため開放</div>
+        </div>
+
+        <div class="schedule-container mt-4">
+          <h2 id="selected-date-title" class="section-title">本日の予約</h2>
+          <div id="schedule-list" class="schedule-list">
+             <div class="loading-spinner"><i class="fa-solid fa-spinner fa-spin"></i></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <button id="btn-open-admin" class="btn-text text-muted"><i class="fa-solid fa-gear"></i> 管理者用 (CSV一括登録)</button>
+    </footer>
+
+    <button id="fab-add" class="fab"><i class="fa-solid fa-plus"></i></button>
+  </div>
+
+  <div id="modal-reserve" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content glass-panel">
+      <button class="modal-close"><i class="fa-solid fa-xmark"></i></button>
+      <h2 class="modal-title"><span id="form-room-label">B6-202</span> 予約登録</h2>
+      <form id="form-reserve" class="modern-form">
+        <div class="form-group row">
+          <div class="col">
+             <label><i class="fa-regular fa-calendar"></i> 日付</label>
+             <input type="date" id="input-date" required>
+          </div>
+        </div>
+        <div class="form-group row">
+          <div class="col">
+             <label><i class="fa-regular fa-clock"></i> 開始時間</label>
+             <input type="time" id="input-start" required>
+          </div>
+          <div class="col">
+             <label><i class="fa-regular fa-clock"></i> 終了時間</label>
+             <input type="time" id="input-end" required>
+          </div>
+        </div>
+        <div class="form-group">
+           <label><i class="fa-solid fa-tag"></i> 概要・目的</label>
+           <input type="text" id="input-title" placeholder="例: 定例会議" required>
+        </div>
+        <div class="form-group">
+           <label><i class="fa-solid fa-user"></i> 氏名</label>
+           <input type="text" id="input-name" placeholder="例: 滋賀 太郎" required>
+        </div>
+        <div class="form-group">
+           <label><i class="fa-solid fa-envelope"></i> メールアドレス</label>
+           <input type="email" id="input-email" required placeholder="例: user@<?= allowedDomains[0].replace(/^@/, '') ?>">
+           <p class="text-muted" style="font-size:0.75rem; margin-top:2px;" id="email-domain-hint">※ 指定されたドメインのみ使用可能です</p>
+           <p class="input-hint">仮予約後に「予約確定用URL」がメールで送信されます（15分間有効）</p>
+        </div>
+        <div class="form-message" id="reserve-msg"></div>
+        <button type="submit" class="btn btn-primary btn-block" id="btn-submit-reserve">仮予約する</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="modal-admin" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content glass-panel">
+      <button class="modal-close"><i class="fa-solid fa-xmark"></i></button>
+      <h2 class="modal-title">管理者用一括登録</h2>
+      <form id="form-admin" class="modern-form">
+        <div class="form-group">
+           <label><i class="fa-solid fa-key"></i> 管理者パスワード</label>
+           <input type="password" id="input-admin-pw" required>
+        </div>
+        <div class="form-group">
+           <label><i class="fa-solid fa-file-csv"></i> CSVファイル</label>
+           <input type="file" id="input-csv" accept=".csv" required>
+        </div>
+        <a href="<?= appUrl ?>?csvTemplate=true" target="_blank" class="text-link mt-2"><i class="fa-solid fa-download"></i> CSVテンプレートをダウンロード</a>
+        <div class="form-message" id="admin-msg"></div>
+        <button type="submit" class="btn btn-primary btn-block mt-4" id="btn-submit-admin">アップロード</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const SERVER_EDIT_TOKEN = "<?= editToken ?>";
+    const DEFAULT_ROOM = "<?= defaultRoom ?>";
+    const APP_URL = "<?= appUrl ?>";
+    const ALLOWED_DOMAINS = <?!= JSON.stringify(allowedDomains) ?>;
+    const ROOM_CONFIGS_JSON = <?!= JSON.stringify(roomConfigs) ?>;
+  </script>
+  <?!= include('js'); ?>
+</body>
+</html>
